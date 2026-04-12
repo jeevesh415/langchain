@@ -55,7 +55,7 @@ from langchain_core.utils.function_calling import (
 from langchain_core.utils.pydantic import is_basemodel_subclass
 from langchain_core.utils.utils import _build_model_kwargs
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
-from typing_extensions import NotRequired, Self, TypedDict
+from typing_extensions import NotRequired, TypedDict
 
 from langchain_anthropic import __version__
 from langchain_anthropic._client_utils import (
@@ -967,18 +967,11 @@ class ChatAnthropic(BaseChatModel):
         all_required_field_names = get_pydantic_field_names(cls)
         return _build_model_kwargs(values, all_required_field_names)
 
-    @model_validator(mode="after")
-    def _set_model_profile(self) -> Self:
-        """Set model profile if not overridden."""
-        if self.profile is None:
-            self.profile = _get_default_model_profile(self.model)
-        if (
-            self.profile is not None
-            and self.betas
-            and "context-1m-2025-08-07" in self.betas
-        ):
-            self.profile["max_input_tokens"] = 1_000_000
-        return self
+    def _resolve_model_profile(self) -> ModelProfile | None:
+        profile = _get_default_model_profile(self.model) or None
+        if profile is not None and self.betas and "context-1m-2025-08-07" in self.betas:
+            profile["max_input_tokens"] = 1_000_000
+        return profile
 
     @cached_property
     def _client_params(self) -> dict[str, Any]:
@@ -1659,7 +1652,7 @@ class ChatAnthropic(BaseChatModel):
         # _get_llm_for_structured_output_when_thinking_is_enabled.
         if (
             self.thinking is not None
-            and self.thinking.get("type") == "enabled"
+            and self.thinking.get("type") in ("enabled", "adaptive")
             and "tool_choice" in kwargs
             and kwargs["tool_choice"].get("type") in ("any", "tool")
         ):
@@ -1788,7 +1781,10 @@ class ChatAnthropic(BaseChatModel):
             # The result of convert_to_anthropic_tool for 'method=function_calling' will
             # always be an AnthropicTool
             tool_name = formatted_tool["name"]
-            if self.thinking is not None and self.thinking.get("type") == "enabled":
+            if self.thinking is not None and self.thinking.get("type") in (
+                "enabled",
+                "adaptive",
+            ):
                 llm = self._get_llm_for_structured_output_when_thinking_is_enabled(
                     schema,
                     formatted_tool,
@@ -2000,7 +1996,7 @@ def _tools_in_params(params: dict) -> bool:
 
 
 def _thinking_in_params(params: dict) -> bool:
-    return params.get("thinking", {}).get("type") == "enabled"
+    return params.get("thinking", {}).get("type") in ("enabled", "adaptive")
 
 
 def _documents_in_params(params: dict) -> bool:
